@@ -36,7 +36,7 @@ shinyServer(function(input, output, session) {
   rain.long <- read.csv(text=rain)
   #rain.long <- head(rain.long, -30)
   
-  
+  Dates <- sapply(acled.long[,1],as.character.Date)
   acled.long$Date <- as.Date(acled.long$Date, format="%m/%d/%Y")
   arrs.long$Date <- as.Date(arrs.long$Date, format="%m/%d/%Y")
   deps.long$Date <- as.Date(deps.long$Date, format="%m/%d/%Y")
@@ -51,10 +51,10 @@ shinyServer(function(input, output, session) {
   
   mydata <- reactive({
     # prepare columns for the merged graph
-    reg <- paste(strsplit(input$region, "_")[[1]][1],"Arrival",sep="_")
+    reg <- paste(strsplit(input$region,  "_(?=[^_]+$)",perl=TRUE)[[1]][1],"Arrival",sep="_")
     I <- acled.long[ 0:(input$days),input$region]
     A <- arrs.long[ 0:input$days, reg ]
-    D <- deps.long[ 0:(input$days),strsplit(input$region, "_")[[1]][1]]
+    D <- deps.long[ 0:(input$days),strsplit(input$region,  "_(?=[^_]+$)",perl=TRUE)[[1]][1]]
     
     long <- data.frame(
       Period=rep((1:input$days),3), 
@@ -71,35 +71,53 @@ shinyServer(function(input, output, session) {
 
    pred_data <- reactive({
     # prepare columns for the merged graph
-    reg <- paste(strsplit(input$region, "_")[[1]][1],"Arrival",sep="_")
+    total_len <- nrow(acled.long)
+    reg <- paste(strsplit(input$region, "_(?=[^_]+$)",perl=TRUE)[[1]][1],"Arrival",sep="_")
     I <- acled.long[ 0:(input$days),input$region]
     A <- arrs.long[ 0:input$days, reg ]
-    D <- deps.long[ 0:(input$days),strsplit(input$region, "_")[[1]][1]]
+    D <- deps.long[ 0:(input$days),strsplit(input$region,  "_(?=[^_]+$)",perl=TRUE)[[1]][1]]
     
     
     rainstart <- nrow(rain.long) - 2*365
     rainend <- rainstart+input$futuredays
     
-    R <- rain.long[ rainstart:rainend, reg]
-    lengthI <- nrow(I)
+    R <- rain.long[ rainstart:rainend, strsplit(input$region, "_(?=[^_]+$)",perl=TRUE)[[1]][1]]
+    lengthI <- length(I)
 
-    TI<- PA <- PD <- rep(NA, input$futuredays+1)
+    TI<- PA <- PD <- rep(NA, input$futuredays)
     
     for (t in 1:input$futuredays){
       newi <-lengthI -30 +t
       #fake function to follow the rainfall in the prediction of July
       TI[t] <- R[t]*35.5 + 10
-      if(input$region == "Shabeellaha_Hoose"){
-        Sanaag <- arrs.long[0:lengthI, "Sanaag"]
-        Bay <- arrs.long[0:lengthI, "Bay"]
-        Shabeellaha_Dhexe <- arrs.long[0:lengthI, "Shabeeellaha_Dhexe"]
+      if(  strsplit(input$region,  "_(?=[^_]+$)",perl=TRUE)[[1]][1] == "Shabeellaha_Hoose"){
+        Sanaag <- arrs.long[0:lengthI, "Sanaag_Arrival"]
+        Bay <- arrs.long[0:lengthI, "Bay_Arrival"]
+        Shabeellaha_Dhexe <- arrs.long[0:lengthI, "Shabeellaha_Dhexe_Arrival"]
         
-        PA[t] <- 5*Sanaag[newi] + 95.4347826086957*(Bay[newi] + 1.01713148623104*Shabeellaha_Dhexe[newi])^(Sanaag[newi])
+        PA[t] <- 5*Sanaag[newi] + 95.4347826086957*(Bay[newi] + 1.01713148623104*Shabeellaha_Dhexe[newi])
+      }
+      else if(strsplit(input$region,  "_(?=[^_]+$)",perl=TRUE)[[1]][1] == "Bay"){
+        
+        Fatalities <- acled.long[0:lengthI,"FATALITIES"]
+        
+        pre <- as.numeric(strsplit(Dates[newi],"/")[[1]])
+        fact <- factorial(pre[1]/pre[2]/pre[3])
+        sma <- mean(Fatalities[newi-100:newi])
+        
+        if(6640.08891456225<fact){
+          fact_less <- 1
+        }
+        else{
+          fact_less <- 0
+        }
+        PA[t]<- 24.3861003861004 + 25.8165153966003 *sma*fact_less
+        
       }
       else{
-        PA[t] <- 0
+        PA[t] <- 2^2*t
       }
-      PD[t] <- 0
+      PD[t] <- 1
     }
     
     long <- data.frame(
@@ -109,14 +127,14 @@ shinyServer(function(input, output, session) {
                       "Arrivals", 
                       "Departures"), 
                     each=input$futuredays))
-    wide <- cbind(I, A, D)
+    wide <- cbind(TI, PA, PD)
     list(long=long, wide=wide)
     
     
   })
   #Create a datatable with all the values from the inputs
   output$datatable <- renderTable({
-      Tdata <- mydata()[["wide"]]
+      Tdata <- pred_data()[["wide"]]
       Tdata <- cbind(day=1:nrow(Tdata), Tdata)
       Tdata[seq(1, nrow(Tdata), length.out=30),]
   })
@@ -136,7 +154,7 @@ shinyServer(function(input, output, session) {
   
   output$ArrivalsPlot <- renderPlot({
     
-    reg <- paste(strsplit(input$region, "_")[[1]][1],"Arrival",sep="_")
+    reg <- paste(strsplit(input$region,  "_(?=[^_]+$)",perl=TRUE)[[1]][1],"Arrival",sep="_")
     arrivals_vector = c(arrs.long[ 1:input$days, reg ])
     names(arrivals_vector) = c(arrs.long[1:input$days,"Date"])
     
@@ -148,7 +166,7 @@ shinyServer(function(input, output, session) {
   
   output$DeparturesPlot <- renderPlot({
     
-    departures_vector = c(deps.long[ 1:(input$days),strsplit(input$region, "_")[[1]][1]])
+    departures_vector = c(deps.long[ 1:(input$days),strsplit(input$region,  "_(?=[^_]+$)",perl=TRUE)[[1]][1]])
     names(departures_vector) = c(deps.long[1:(input$days),"Date"])
     
     barplot(departures_vector,
@@ -172,7 +190,7 @@ shinyServer(function(input, output, session) {
   
   output$graph2 <- renderPlot({
     
-    long <- mydata()[["long"]]
+    long <- pred_data()[["long"]]
     p <- ggplot(long[long$Indicator %in% input$Indicators,], 
                 aes(x=Period, y=Population, group=Indicator))    
     p <- p + 
